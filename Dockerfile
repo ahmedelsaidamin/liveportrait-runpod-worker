@@ -1,33 +1,32 @@
 FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-devel
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
 WORKDIR /workspace
 
 RUN apt-get update && apt-get install -y \
     git wget curl ffmpeg libgl1 libglib2.0-0 build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --upgrade pip setuptools wheel
+RUN pip install --upgrade pip setuptools wheel
 
-RUN git clone --depth 1 https://github.com/KwaiVGI/LivePortrait.git /workspace/LivePortrait
+RUN git clone --depth 1 https://github.com/KwaiVGI/LivePortrait.git
 
 WORKDIR /workspace/LivePortrait
 
-RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+RUN pip install -r requirements.txt
 
-RUN pip install huggingface_hub
+RUN pip install -U "huggingface_hub[cli]"
 
-# تحميل الأوزان باستخدام Python مباشرة بدلاً من CLI القديم
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='KwaiVGI/LivePortrait', local_dir='/workspace/LivePortrait/pretrained_weights', local_dir_use_symlinks=False)"
+# ✅ الأمر الصحيح باستخدام hf بدلاً من huggingface-cli
+RUN mkdir -p pretrained_weights/liveportrait/base_models && \
+    hf download KwaiVGI/LivePortrait --local-dir /tmp/lp_weights && \
+    cp -r /tmp/lp_weights/* pretrained_weights/ && \
+    rm -rf /tmp/lp_weights
 
-RUN pip install --no-cache-dir \
-    runpod \
-    opencv-python-headless \
-    imageio imageio-ffmpeg \
-    ffmpeg-python \
-    numpy scipy tqdm pillow pyyaml requests \
-    moviepy==1.0.3
+RUN test -f pretrained_weights/liveportrait/base_models/appearance_feature_extractor.pth \
+    && echo "✅ weights OK" || (echo "❌ weights missing" && exit 1)
+
+RUN pip install runpod opencv-python-headless imageio imageio-ffmpeg \
+    ffmpeg-python numpy scipy tqdm pillow pyyaml requests moviepy
 
 WORKDIR /
 COPY handler.py /handler.py
