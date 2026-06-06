@@ -12,6 +12,16 @@ WORKDIR = Path("/workspace")
 LIVEPORTRAIT_DIR = WORKDIR / "LivePortrait"
 
 
+def write_b64(data_b64: str, path: Path):
+    if not data_b64:
+        raise ValueError("Missing base64 data")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(base64.b64decode(data_b64))
+    if not path.exists() or path.stat().st_size < 100:
+        raise RuntimeError(f"Base64 write failed or file too small: {path}")
+    return path
+
+
 def download(url: str, path: Path):
     if not url:
         raise ValueError("Missing URL")
@@ -20,6 +30,21 @@ def download(url: str, path: Path):
     if not path.exists() or path.stat().st_size < 100:
         raise RuntimeError(f"Download failed or file too small: {url}")
     return path
+
+
+def get_input_file(inp, b64_key, url_key, ext_key, default_ext, path_base: Path):
+    ext = inp.get(ext_key) or default_ext
+    if not ext.startswith("."):
+        ext = "." + ext
+    path = path_base.with_suffix(ext)
+
+    if inp.get(b64_key):
+        return write_b64(inp.get(b64_key), path)
+
+    if inp.get(url_key):
+        return download(inp.get(url_key), path)
+
+    raise ValueError(f"Missing {b64_key} or {url_key}")
 
 
 def find_latest_mp4(folder: Path) -> Path:
@@ -87,18 +112,37 @@ def handler(event):
     try:
         inp = event.get("input", {}) or {}
 
-        source_image_url = inp.get("source_image_url")
-        driving_video_url = inp.get("driving_video_url")
-        audio_url = inp.get("audio_url")
-
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
-            source_image = download(source_image_url, td / "source.png")
-            driving_video = download(driving_video_url, td / "driving.mp4")
+
+            source_image = get_input_file(
+                inp,
+                "source_image_b64",
+                "source_image_url",
+                "source_image_ext",
+                ".png",
+                td / "source",
+            )
+
+            driving_video = get_input_file(
+                inp,
+                "driving_video_b64",
+                "driving_video_url",
+                "driving_video_ext",
+                ".mp4",
+                td / "driving",
+            )
 
             audio_path = None
-            if audio_url:
-                audio_path = download(audio_url, td / "audio.mp3")
+            if inp.get("audio_b64") or inp.get("audio_url"):
+                audio_path = get_input_file(
+                    inp,
+                    "audio_b64",
+                    "audio_url",
+                    "audio_ext",
+                    ".mp3",
+                    td / "audio",
+                )
 
             raw_video = run_liveportrait(source_image, driving_video, td / "lp_output")
 
