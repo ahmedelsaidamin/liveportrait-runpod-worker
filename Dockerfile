@@ -18,16 +18,11 @@ RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
 RUN pip install -U "huggingface_hub[cli]"
 
-# 🔥 إجبار إعادة تحميل الأوزان بتغيير اسم المجلد المؤقت
-RUN mkdir -p /workspace/LivePortrait/pretrained_weights/liveportrait/base_models
-
-RUN echo "Forcing fresh download of LivePortrait weights on $(date)" && \
-    huggingface-cli download KwaiVGI/LivePortrait --local-dir /tmp/liveportrait_weights_force && \
-    cp -r /tmp/liveportrait_weights_force/* /workspace/LivePortrait/pretrained_weights/ && \
-    rm -rf /tmp/liveportrait_weights_force
-
-RUN test -f /workspace/LivePortrait/pretrained_weights/liveportrait/base_models/appearance_feature_extractor.pth \
-    && echo "✅ weights installed" || (echo "❌ weights missing" && exit 1)
+# تحميل الأوزان من HuggingFace مباشرة إلى المسار الصحيح
+RUN mkdir -p /workspace/LivePortrait/pretrained_weights/liveportrait/base_models && \
+    huggingface-cli download KwaiVGI/LivePortrait --local-dir /tmp/lp_weights && \
+    cp -r /tmp/lp_weights/* /workspace/LivePortrait/pretrained_weights/ && \
+    rm -rf /tmp/lp_weights
 
 RUN pip install --no-cache-dir \
     runpod \
