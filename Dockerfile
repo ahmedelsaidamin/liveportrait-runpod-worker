@@ -16,6 +16,12 @@ WORKDIR /workspace/LivePortrait
 
 RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+# Download LivePortrait pretrained weights during image build
+RUN pip install -U "huggingface_hub[cli]"
+
+RUN huggingface-cli download KwaiVGI/LivePortrait \
+    --local-dir /workspace/LivePortrait/pretrained_weights
+
 RUN pip install --no-cache-dir \
     runpod \
     opencv-python-headless \
