@@ -1,20 +1,35 @@
 FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-devel
 
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
 WORKDIR /workspace
 
-RUN apt-get update && apt-get install -y git wget ffmpeg libgl1
+RUN apt-get update && apt-get install -y \
+    git wget curl ffmpeg libgl1 libglib2.0-0 build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/KwaiVGI/LivePortrait.git
+RUN python -m pip install --upgrade pip setuptools wheel
+
+RUN git clone --depth 1 https://github.com/KwaiVGI/LivePortrait.git /workspace/LivePortrait
 
 WORKDIR /workspace/LivePortrait
 
-RUN pip install -r requirements.txt
+RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-RUN pip install huggingface_hub runpod
+RUN pip install huggingface_hub
 
-# تحميل الأوزان مباشرة إلى المسار المطلوب
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='KwaiVGI/LivePortrait', local_dir='pretrained_weights')"
+# تحميل الأوزان باستخدام Python مباشرة بدلاً من CLI القديم
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='KwaiVGI/LivePortrait', local_dir='/workspace/LivePortrait/pretrained_weights', local_dir_use_symlinks=False)"
 
+RUN pip install --no-cache-dir \
+    runpod \
+    opencv-python-headless \
+    imageio imageio-ffmpeg \
+    ffmpeg-python \
+    numpy scipy tqdm pillow pyyaml requests \
+    moviepy==1.0.3
+
+WORKDIR /
 COPY handler.py /handler.py
 
 CMD ["python", "-u", "/handler.py"]
