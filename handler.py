@@ -18,7 +18,6 @@ def ensure_weights():
     if EXPECTED_WEIGHT.exists():
         print("✅ weights already in correct location")
         return True
-
     print("⚠️ weights not found. Trying to fix...")
     base_weights = LIVEPORTRAIT_DIR / "pretrained_weights"
     if base_weights.exists():
@@ -29,7 +28,6 @@ def ensure_weights():
                 EXPECTED_WEIGHT.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(found, EXPECTED_WEIGHT)
                 return True
-
     print("⚠️ downloading weights from HuggingFace...")
     try:
         subprocess.run(
