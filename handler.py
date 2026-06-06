@@ -15,28 +15,21 @@ LIVEPORTRAIT_DIR = WORKDIR / "LivePortrait"
 EXPECTED_WEIGHT = LIVEPORTRAIT_DIR / "pretrained_weights/liveportrait/base_models/appearance_feature_extractor.pth"
 
 def ensure_weights():
-    """تتأكد من وجود الأوزان في المكان الصحيح، وإلا تحاول إصلاح المسار أو تحميلها"""
     if EXPECTED_WEIGHT.exists():
         print("✅ weights already in correct location")
         return True
 
-    print("⚠️ weights not found in expected path. Trying to fix...")
-
-    # البحث في أي مكان تحت pretrained_weights
+    print("⚠️ weights not found. Trying to fix...")
     base_weights = LIVEPORTRAIT_DIR / "pretrained_weights"
     if base_weights.exists():
         for root, dirs, files in os.walk(base_weights):
             if "appearance_feature_extractor.pth" in files:
                 found = Path(root) / "appearance_feature_extractor.pth"
                 print(f"✅ found weights at: {found}")
-                # إنشاء المجلد المستهدف
                 EXPECTED_WEIGHT.parent.mkdir(parents=True, exist_ok=True)
-                # نسخ الملف
                 shutil.copy2(found, EXPECTED_WEIGHT)
-                print(f"✅ copied to {EXPECTED_WEIGHT}")
                 return True
 
-    # آخر حل: تحميل الأوزان من HuggingFace مباشرة داخل الحاوية
     print("⚠️ downloading weights from HuggingFace...")
     try:
         subprocess.run(
@@ -46,10 +39,10 @@ def ensure_weights():
         )
         EXPECTED_WEIGHT.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree("/tmp/live_weights", base_weights, dirs_exist_ok=True)
-        print("✅ weights downloaded and installed")
+        print("✅ weights downloaded")
         return True
     except Exception as e:
-        print(f"❌ failed to download weights: {e}")
+        print(f"❌ failed: {e}")
         return False
 
 def write_b64(data_b64: str, path: Path):
@@ -58,7 +51,7 @@ def write_b64(data_b64: str, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(base64.b64decode(data_b64))
     if not path.exists() or path.stat().st_size < 100:
-        raise RuntimeError(f"Base64 write failed or file too small: {path}")
+        raise RuntimeError(f"Base64 write failed: {path}")
     return path
 
 def download(url: str, path: Path):
@@ -67,7 +60,7 @@ def download(url: str, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     urlretrieve(url, str(path))
     if not path.exists() or path.stat().st_size < 100:
-        raise RuntimeError(f"Download failed or file too small: {url}")
+        raise RuntimeError(f"Download failed: {url}")
     return path
 
 def get_input_file(inp, b64_key, url_key, ext_key, default_ext, path_base: Path):
@@ -144,9 +137,8 @@ def run_liveportrait(source_image: Path, driving_video: Path, output_dir: Path) 
 
 def handler(event):
     try:
-        # أولاً: نتأكد من وجود الأوزان
         if not ensure_weights():
-            return {"ok": False, "error": "LivePortrait weights are missing and could not be fixed"}
+            return {"ok": False, "error": "LivePortrait weights missing"}
 
         inp = event.get("input", {}) or {}
 
