@@ -15,13 +15,11 @@ LIVEPORTRAIT_DIR = WORKDIR / "LivePortrait"
 EXPECTED_WEIGHT = LIVEPORTRAIT_DIR / "pretrained_weights/liveportrait/base_models/appearance_feature_extractor.pth"
 
 def ensure_weights():
-    """تتأكد من وجود الأوزان في المكان الصحيح، وإلا تحاول إصلاح المسار أو تحميلها"""
     if EXPECTED_WEIGHT.exists():
         print("✅ weights already in correct location")
         return True
 
     print("⚠️ weights not found in expected path. Trying to fix...")
-
     base_weights = LIVEPORTRAIT_DIR / "pretrained_weights"
     if base_weights.exists():
         for root, dirs, files in os.walk(base_weights):
@@ -30,7 +28,6 @@ def ensure_weights():
                 print(f"✅ found weights at: {found}")
                 EXPECTED_WEIGHT.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(found, EXPECTED_WEIGHT)
-                print(f"✅ copied to {EXPECTED_WEIGHT}")
                 return True
 
     print("⚠️ downloading weights from HuggingFace...")
@@ -185,7 +182,6 @@ def handler(event):
             data = final_video.read_bytes()
             video_base64_str = base64.b64encode(data).decode("utf-8")
 
-            # ✅ تنسيق بسيط متوافق مع RunPod ومع التطبيق
             return {
                 "status": "COMPLETED",
                 "ok": True,
