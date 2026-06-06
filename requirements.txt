@@ -1,0 +1,9 @@
+runpod
+requests
+numpy
+pillow
+opencv-python-headless
+imageio
+imageio-ffmpeg
+ffmpeg-python
+moviepy==1.0.3
