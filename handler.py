@@ -1,6 +1,9 @@
 import runpod
+import subprocess
+import os
 
 def handler(event):
-    return {"status": "ok", "message": "LivePortrait worker ready"}
+    print("Received event:", event)
+    return {"status": "ok", "message": "Worker is ready"}
 
 runpod.serverless.start({"handler": handler})
