@@ -22,7 +22,6 @@ def ensure_weights():
 
     print("⚠️ weights not found in expected path. Trying to fix...")
 
-    # البحث في أي مكان تحت pretrained_weights
     base_weights = LIVEPORTRAIT_DIR / "pretrained_weights"
     if base_weights.exists():
         for root, dirs, files in os.walk(base_weights):
@@ -34,7 +33,6 @@ def ensure_weights():
                 print(f"✅ copied to {EXPECTED_WEIGHT}")
                 return True
 
-    # آخر حل: تحميل الأوزان من HuggingFace مباشرة داخل الحاوية
     print("⚠️ downloading weights from HuggingFace...")
     try:
         subprocess.run(
@@ -42,7 +40,6 @@ def ensure_weights():
             check=True, capture_output=True
         )
         EXPECTED_WEIGHT.parent.mkdir(parents=True, exist_ok=True)
-        # نسخ كل المحتويات إلى pretrained_weights
         shutil.copytree("/tmp/live_weights", base_weights, dirs_exist_ok=True)
         print("✅ weights downloaded and installed")
         return True
@@ -142,9 +139,8 @@ def run_liveportrait(source_image: Path, driving_video: Path, output_dir: Path) 
 
 def handler(event):
     try:
-        # أولاً: نتأكد من وجود الأوزان
         if not ensure_weights():
-            return {"status": "FAILED", "error": "LivePortrait weights are missing and could not be fixed"}
+            return {"status": "FAILED", "error": "LivePortrait weights missing"}
 
         inp = event.get("input", {}) or {}
 
@@ -187,15 +183,15 @@ def handler(event):
                 final_video = merge_audio(raw_video, audio_path, td / "final_with_audio.mp4")
 
             data = final_video.read_bytes()
-            # ✅ التنسيق المتوافق مع RunPod
+            video_base64_str = base64.b64encode(data).decode("utf-8")
+
+            # ✅ تنسيق بسيط متوافق مع RunPod ومع التطبيق
             return {
                 "status": "COMPLETED",
-                "output": {
-                    "ok": True,
-                    "filename": "liveportrait_result.mp4",
-                    "video_base64": base64.b64encode(data).decode("utf-8"),
-                    "size_bytes": len(data),
-                }
+                "ok": True,
+                "filename": "liveportrait_result.mp4",
+                "video_base64": video_base64_str,
+                "size_bytes": len(data),
             }
 
     except subprocess.CalledProcessError as e:
@@ -206,5 +202,4 @@ def handler(event):
     except Exception as e:
         return {"status": "FAILED", "error": str(e)}
 
-# نقطة الدخول لـ RunPod serverless
 runpod.serverless.start({"handler": handler})
