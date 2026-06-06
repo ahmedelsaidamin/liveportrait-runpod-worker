@@ -16,11 +16,21 @@ WORKDIR /workspace/LivePortrait
 
 RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-# Download LivePortrait pretrained weights during image build
+# تثبيت أداة HuggingFace Hub
 RUN pip install -U "huggingface_hub[cli]"
 
-RUN huggingface-cli download KwaiVGI/LivePortrait \
-    --local-dir /workspace/LivePortrait/pretrained_weights
+# إنشاء مجلد الأوزان الهدف
+RUN mkdir -p /workspace/LivePortrait/pretrained_weights
+
+# تنزيل الأوزان في مجلد مؤقت ثم نسخها إلى المجلد الصحيح
+RUN huggingface-cli download KwaiVGI/LivePortrait --local-dir /tmp/liveportrait_weights \
+    && cp -r /tmp/liveportrait_weights/* /workspace/LivePortrait/pretrained_weights/ \
+    && rm -rf /tmp/liveportrait_weights
+
+# تأكد من وجود الملف المطلوب (فحص أمان)
+RUN test -f /workspace/LivePortrait/pretrained_weights/liveportrait/base_models/appearance_feature_extractor.pth \
+    && echo "✅ LivePortrait weights installed correctly" \
+    || (echo "❌ ERROR: weights not found at expected path" && exit 1)
 
 RUN pip install --no-cache-dir \
     runpod \
