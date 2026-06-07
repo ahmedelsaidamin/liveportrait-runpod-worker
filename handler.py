@@ -18,19 +18,15 @@ def ensure_weights():
     if EXPECTED_WEIGHT.exists():
         print("✅ weights already in correct location")
         return True
-
-    print("⚠️ weights not found in expected path. Trying to fix...")
+    print("⚠️ weights not found. Trying to fix...")
     base_weights = LIVEPORTRAIT_DIR / "pretrained_weights"
     if base_weights.exists():
         for root, dirs, files in os.walk(base_weights):
             if "appearance_feature_extractor.pth" in files:
                 found = Path(root) / "appearance_feature_extractor.pth"
-                print(f"✅ found weights at: {found}")
                 EXPECTED_WEIGHT.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(found, EXPECTED_WEIGHT)
                 return True
-
-    print("⚠️ downloading weights from HuggingFace...")
     try:
         subprocess.run(
             ["hf", "download", "KwaiVGI/LivePortrait", "--local-dir", "/tmp/live_weights"],
@@ -38,203 +34,144 @@ def ensure_weights():
         )
         EXPECTED_WEIGHT.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree("/tmp/live_weights", base_weights, dirs_exist_ok=True)
-        print("✅ weights downloaded and installed")
         return True
     except Exception as e:
-        print(f"❌ failed to download weights: {e}")
+        print(f"❌ failed: {e}")
         return False
 
 def write_b64(data_b64: str, path: Path):
-    if not data_b64:
-        raise ValueError("Missing base64 data")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(base64.b64decode(data_b64))
-    if not path.exists() or path.stat().st_size < 100:
-        raise RuntimeError(f"Base64 write failed or file too small: {path}")
     return path
 
-def download(url: str, path: Path):
-    if not url:
-        raise ValueError("Missing URL")
+def download_url(url: str, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     urlretrieve(url, str(path))
-    if not path.exists() or path.stat().st_size < 100:
-        raise RuntimeError(f"Download failed or file too small: {url}")
     return path
 
-def get_input_file(inp, b64_key, url_key, ext_key, default_ext, path_base: Path):
+def get_file(inp, b64_key, url_key, ext_key, default_ext, dest: Path):
     ext = inp.get(ext_key) or default_ext
-    if not ext.startswith("."):
-        ext = "." + ext
-    path = path_base.with_suffix(ext)
-
+    if not ext.startswith("."): ext = "." + ext
+    dest = dest.with_suffix(ext)
     if inp.get(b64_key):
-        return write_b64(inp.get(b64_key), path)
-
+        return write_b64(inp[b64_key], dest)
     if inp.get(url_key):
-        return download(inp.get(url_key), path)
-
+        return download_url(inp[url_key], dest)
     raise ValueError(f"Missing {b64_key} or {url_key}")
 
-def get_audio_duration(audio_path: Path) -> float:
-    """Get duration of audio file in seconds."""
-    try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-             "-of", "csv=p=0", str(audio_path)],
-            capture_output=True, text=True
-        )
-        return float(result.stdout.strip())
-    except Exception:
-        return 0.0
+def get_audio_duration(path: Path) -> float:
+    r = subprocess.run(
+        ["ffprobe","-v","quiet","-show_entries","format=duration","-of","csv=p=0",str(path)],
+        capture_output=True, text=True
+    )
+    try: return float(r.stdout.strip())
+    except: return 0.0
 
-def loop_driving_video(driving_video: Path, target_duration: float, output_path: Path) -> Path:
-    """Loop driving video to match audio duration."""
-    if target_duration <= 0:
-        return driving_video
+def cut_audio(audio: Path, start: float, duration: float, out: Path) -> Path:
+    """قطع جزء من الـ audio."""
     subprocess.run([
-        "ffmpeg", "-y",
-        "-stream_loop", "-1",
-        "-i", str(driving_video),
-        "-t", str(target_duration),
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-        "-an", str(output_path)
+        "ffmpeg","-y",
+        "-ss", str(start),
+        "-t",  str(duration),
+        "-i",  str(audio),
+        "-c:a","libmp3lame","-q:a","2",
+        str(out)
     ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return output_path
+    return out
 
-def find_latest_mp4(folder: Path) -> Path:
-    files = list(folder.rglob("*.mp4"))
-    if not files:
-        raise RuntimeError("LivePortrait did not create any mp4 output")
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+def loop_driving(driving: Path, duration: float, out: Path) -> Path:
+    """Loop الـ driving video لمدة محددة."""
+    subprocess.run([
+        "ffmpeg","-y",
+        "-stream_loop","-1",
+        "-i", str(driving),
+        "-t", str(duration),
+        "-c:v","libx264","-preset","fast","-crf","23",
+        "-an", str(out)
+    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return out
+
+def run_liveportrait(source: Path, driving: Path, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    script = None
+    for s in [LIVEPORTRAIT_DIR/"inference.py", LIVEPORTRAIT_DIR/"src"/"inference.py"]:
+        if s.exists(): script = s; break
+    if not script:
+        raise RuntimeError("Cannot find LivePortrait inference.py")
+    subprocess.run(
+        [sys.executable, str(script), "-s", str(source), "-d", str(driving), "-o", str(output_dir)],
+        cwd=str(LIVEPORTRAIT_DIR), check=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    files = sorted(output_dir.rglob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files: raise RuntimeError("No mp4 output from LivePortrait")
     return files[0]
 
-def merge_audio(video_path: Path, audio_path: Path, output_path: Path) -> Path:
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(video_path),
-        "-i", str(audio_path),
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-shortest",
-        str(output_path),
-    ]
-    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return output_path
-
-def run_liveportrait(source_image: Path, driving_video: Path, output_dir: Path) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    script_candidates = [
-        LIVEPORTRAIT_DIR / "inference.py",
-        LIVEPORTRAIT_DIR / "src" / "inference.py",
-    ]
-
-    script = None
-    for s in script_candidates:
-        if s.exists():
-            script = s
-            break
-
-    if script is None:
-        raise RuntimeError("Cannot find LivePortrait inference.py")
-
-    cmd = [
-        sys.executable,
-        str(script),
-        "-s", str(source_image),
-        "-d", str(driving_video),
-        "-o", str(output_dir),
-    ]
-
-    subprocess.run(
-        cmd,
-        cwd=str(LIVEPORTRAIT_DIR),
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-    return find_latest_mp4(output_dir)
+def merge_audio(video: Path, audio: Path, out: Path) -> Path:
+    subprocess.run([
+        "ffmpeg","-y","-i",str(video),"-i",str(audio),
+        "-map","0:v:0","-map","1:a:0",
+        "-c:v","copy","-c:a","aac","-shortest",
+        str(out)
+    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return out
 
 def handler(event):
     try:
         if not ensure_weights():
-            return {"status": "FAILED", "error": "LivePortrait weights missing"}
+            return {"status":"FAILED","error":"weights missing"}
 
         inp = event.get("input", {}) or {}
+
+        # chunk params (اختياري)
+        chunk_start    = float(inp.get("chunk_start", 0))
+        chunk_duration = float(inp.get("chunk_duration", 0))  # 0 = الـ audio كله
 
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
 
-            source_image = get_input_file(
-                inp,
-                "source_image_b64",
-                "source_image_url",
-                "source_image_ext",
-                ".png",
-                td / "source",
-            )
+            source  = get_file(inp, "source_image_b64",  "source_image_url",  "source_image_ext",  ".png", td/"source")
+            driving = get_file(inp, "driving_video_b64", "driving_video_url", "driving_video_ext", ".mp4", td/"driving")
+            audio   = get_file(inp, "audio_b64",         "audio_url",         "audio_ext",         ".mp3", td/"audio")
 
-            driving_video = get_input_file(
-                inp,
-                "driving_video_b64",
-                "driving_video_url",
-                "driving_video_ext",
-                ".mp4",
-                td / "driving",
-            )
+            # قطع الـ chunk المطلوب من الـ audio
+            if chunk_duration > 0:
+                chunk_audio = td / "chunk_audio.mp3"
+                cut_audio(audio, chunk_start, chunk_duration, chunk_audio)
+                audio = chunk_audio
+                target_dur = chunk_duration
+            else:
+                target_dur = get_audio_duration(audio)
 
-            audio_path = None
-            if inp.get("audio_b64") or inp.get("audio_url"):
-                audio_path = get_input_file(
-                    inp,
-                    "audio_b64",
-                    "audio_url",
-                    "audio_ext",
-                    ".mp3",
-                    td / "audio",
-                )
+            # Loop الـ driving video بطول الـ chunk
+            if target_dur > 0:
+                looped_drv = td / "driving_looped.mp4"
+                try:
+                    loop_driving(driving, target_dur, looped_drv)
+                    if looped_drv.exists() and looped_drv.stat().st_size > 100:
+                        driving = looped_drv
+                except Exception as le:
+                    print(f"⚠️ loop failed: {le}")
 
-            # ── Loop driving video to match audio duration ──────────────
-            if audio_path:
-                audio_dur = get_audio_duration(audio_path)
-                if audio_dur > 0:
-                    looped = td / "driving_looped.mp4"
-                    try:
-                        loop_driving_video(driving_video, audio_dur, looped)
-                        if looped.exists() and looped.stat().st_size > 100:
-                            driving_video = looped
-                            print(f"✅ driving video looped to {audio_dur:.1f}s")
-                    except Exception as le:
-                        print(f"⚠️ loop failed, using original: {le}")
+            # توليد الفيديو
+            raw_video = run_liveportrait(source, driving, td/"lp_output")
 
-            raw_video = run_liveportrait(source_image, driving_video, td / "lp_output")
+            # دمج الصوت
+            final = merge_audio(raw_video, audio, td/"final.mp4")
 
-            final_video = raw_video
-            if audio_path:
-                final_video = merge_audio(raw_video, audio_path, td / "final_with_audio.mp4")
-
-            data = final_video.read_bytes()
-            video_base64_str = base64.b64encode(data).decode("utf-8")
-
+            data = final.read_bytes()
             return {
-                "status": "COMPLETED",
-                "ok": True,
-                "filename": "liveportrait_result.mp4",
-                "video_base64": video_base64_str,
-                "size_bytes": len(data),
+                "status":       "COMPLETED",
+                "ok":           True,
+                "video_base64": base64.b64encode(data).decode(),
+                "chunk_start":  chunk_start,
+                "chunk_duration": chunk_duration,
+                "size_bytes":   len(data),
             }
 
     except subprocess.CalledProcessError as e:
-        return {
-            "status": "FAILED",
-            "error": f"Command failed: {e.stderr[-2000:] if e.stderr else str(e)}"
-        }
+        return {"status":"FAILED","error": f"Command failed: {e.stderr[-2000:] if e.stderr else str(e)}"}
     except Exception as e:
-        return {"status": "FAILED", "error": str(e)}
+        return {"status":"FAILED","error": str(e)}
 
 runpod.serverless.start({"handler": handler})
