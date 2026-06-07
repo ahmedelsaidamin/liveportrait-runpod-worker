@@ -76,6 +76,32 @@ def get_input_file(inp, b64_key, url_key, ext_key, default_ext, path_base: Path)
 
     raise ValueError(f"Missing {b64_key} or {url_key}")
 
+def get_audio_duration(audio_path: Path) -> float:
+    """Get duration of audio file in seconds."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(audio_path)],
+            capture_output=True, text=True
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return 0.0
+
+def loop_driving_video(driving_video: Path, target_duration: float, output_path: Path) -> Path:
+    """Loop driving video to match audio duration."""
+    if target_duration <= 0:
+        return driving_video
+    subprocess.run([
+        "ffmpeg", "-y",
+        "-stream_loop", "-1",
+        "-i", str(driving_video),
+        "-t", str(target_duration),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-an", str(output_path)
+    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return output_path
+
 def find_latest_mp4(folder: Path) -> Path:
     files = list(folder.rglob("*.mp4"))
     if not files:
@@ -172,6 +198,19 @@ def handler(event):
                     ".mp3",
                     td / "audio",
                 )
+
+            # ── Loop driving video to match audio duration ──────────────
+            if audio_path:
+                audio_dur = get_audio_duration(audio_path)
+                if audio_dur > 0:
+                    looped = td / "driving_looped.mp4"
+                    try:
+                        loop_driving_video(driving_video, audio_dur, looped)
+                        if looped.exists() and looped.stat().st_size > 100:
+                            driving_video = looped
+                            print(f"✅ driving video looped to {audio_dur:.1f}s")
+                    except Exception as le:
+                        print(f"⚠️ loop failed, using original: {le}")
 
             raw_video = run_liveportrait(source_image, driving_video, td / "lp_output")
 
